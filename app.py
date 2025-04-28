@@ -18,53 +18,76 @@ def load_data():
     df['Risk Level'] = df['Value'].apply(classify_risk)
     return df
 
-df = load_data()
+# Initialize session state variables
+if 'df' not in st.session_state:
+    st.session_state.df = load_data()
+if 'filtered_df' not in st.session_state:
+    st.session_state.filtered_df = st.session_state.df
+if 'page' not in st.session_state:
+    st.session_state.page = "Dashboard"
+
+df = st.session_state.df
 
 # Dashboard setup
 st.set_page_config(page_title="Interest Rates Risk Analysis", layout="wide")
 st.title("Interest Rates with Risk Level Classification")
 
-# Sidebar controls for page selection
+# Sidebar controls for page selection and filters
 st.sidebar.header("Navigation")
-pages = ["Dashboard", "Summary Statistics", "About"]
-page = st.sidebar.radio("Select a page:", pages)
+if st.sidebar.button("About"):
+    st.session_state.page = "About"
+if st.sidebar.button("Dashboard"):
+    st.session_state.page = "Dashboard"
+if st.sidebar.button("Summary Statistics"):
+    st.session_state.page = "Summary"
 
-# Dashboard Page
-if page == "Dashboard":
-    # Sidebar controls
-    st.sidebar.header("Filters")
-    rate_types = df['Description'].unique()
-    selected_rates = st.sidebar.multiselect(
-        "Select rate types", 
-        rate_types, 
-        default=["TREASURY BILL RATE", "ADVANCE RATE (END OF PERIOD)"]
-    )
+# Sidebar filters (always visible)
+st.sidebar.header("Filters")
+rate_types = df['Description'].unique()
+selected_rates = st.sidebar.multiselect(
+    "Select rate types", 
+    rate_types, 
+    default=["TREASURY BILL RATE", "ADVANCE RATE (END OF PERIOD)"]
+)
 
-    risk_levels = st.sidebar.multiselect(
-        "Select risk levels",
-        ["Low", "Medium", "High"],
-        default=["Low", "Medium", "High"]
-    )
+risk_levels = st.sidebar.multiselect(
+    "Select risk levels",
+    ["Low", "Medium", "High"],
+    default=["Low", "Medium", "High"]
+)
 
-    year_range = st.sidebar.slider(
-        "Select year range",
-        min_value=int(df['Year'].min()),
-        max_value=int(df['Year'].max()),
-        value=(1990, 2008)
-    )
+year_range = st.sidebar.slider(
+    "Select year range",
+    min_value=int(df['Year'].min()),
+    max_value=int(df['Year'].max()),
+    value=(1990, 2008)
+)
 
-    # Filter data
-    filtered_df = df[(
-        df['Description'].isin(selected_rates)) & 
-        (df['Risk Level'].isin(risk_levels)) & 
-        (df['Year'] >= year_range[0]) & 
-        (df['Year'] <= year_range[1])
-    ]
+# Apply filters (runs whenever filters change)
+filtered_df = df[
+    (df['Description'].isin(selected_rates)) & 
+    (df['Risk Level'].isin(risk_levels)) & 
+    (df['Year'] >= year_range[0]) & 
+    (df['Year'] <= year_range[1])
+]
+st.session_state.filtered_df = filtered_df
 
+# Page routing
+if st.session_state.page == "About":
+    st.subheader("About this Dashboard")
+    st.write("""
+        This dashboard visualizes and analyzes interest rates with a focus on risk classification. 
+        The data is categorized into different risk levels based on interest rate values:
+        - **Low Risk**: Interest rate below 10%
+        - **Medium Risk**: Interest rate between 10% and 20%
+        - **High Risk**: Interest rate above 20%
+        
+        You can filter the data by rate type, risk level, and year to perform various visual analyses.
+    """)
 
-    # Main visualizations
+elif st.session_state.page == "Dashboard":
     st.subheader("Comparative Analysis")
-
+    
     # Create tabs for different visualizations
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Scatter Plot", "Pie Chart", "Area Chart", "Histogram", "Heatmap"])
 
@@ -147,7 +170,6 @@ if page == "Dashboard":
                     hover_data=["Year"]
                 )
                 
-                # Add vertical line for mean
                 mean_val = hist_data['Value'].mean()
                 fig.add_vline(
                     x=mean_val,
@@ -159,7 +181,6 @@ if page == "Dashboard":
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Display statistics
                 st.write(f"""
                 **Statistics for {selected_rate}**:
                 - Mean: {hist_data['Value'].mean():.2f}%
@@ -176,75 +197,46 @@ if page == "Dashboard":
     with tab5:
         st.subheader("Heatmap of Interest Rates by Year and Risk Level")
         if not filtered_df.empty:
-            # Pivot table to structure the data for heatmap
             heatmap_data = filtered_df.pivot_table(
-                index='Year', columns='Risk Level', values='Value', aggfunc=np.mean
+                index='Year',
+                columns='Risk Level',
+                values='Value',
+                aggfunc=np.mean
             )
-            
+
             fig = go.Figure(data=go.Heatmap(
                 z=heatmap_data.values,
                 x=heatmap_data.columns,
                 y=heatmap_data.index,
-                colorscale='RdYlGn',
-                colorbar=dict(title="Interest Rate (%)")
+                colorscale='Viridis',
+                colorbar=dict(title='Interest Rate (%)'),
             ))
-            fig.update_layout(
-                title="Heatmap of Average Interest Rates by Risk Level",
-                xaxis_title="Risk Level",
-                yaxis_title="Year"
-            )
+            fig.update_layout(title="Heatmap of Interest Rates by Year and Risk Level")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("No data matches your filters")
 
-    # Show data table with risk levels
-    st.subheader("Detailed Data with Risk Levels")
-    st.dataframe(
-        filtered_df.sort_values(['Year', 'Risk Level']),
-        column_order=['Year', 'Description', 'Value', 'Risk Level'],
-        hide_index=True,
-        height=300
-    )
-
-# Summary Statistics Page
-elif page == "Summary Statistics":
+elif st.session_state.page == "Summary":
     st.subheader("Summary Statistics")
     
     if not filtered_df.empty:
-        st.write(f"**Total Records**: {filtered_df.shape[0]}")
-        
         # Basic statistics
-        st.write("**Basic Statistics**:")
-        st.write(filtered_df.describe())
+        st.write("### Basic Statistics")
+        st.write(filtered_df['Value'].describe().to_frame().T)
         
-        # Risk level breakdown
-        st.write("**Risk Level Breakdown**:")
-        risk_breakdown = filtered_df['Risk Level'].value_counts().reset_index()
-        risk_breakdown.columns = ['Risk Level', 'Count']
-        st.dataframe(risk_breakdown)
+        # Statistics by risk level
+        st.write("### Statistics by Risk Level")
+        risk_stats = filtered_df.groupby('Risk Level')['Value'].agg(['mean', 'median', 'std', 'min', 'max'])
+        st.write(risk_stats)
         
-        # Mean interest rates by risk level
-        st.write("**Mean Interest Rates by Risk Level**:")
-        mean_by_risk = filtered_df.groupby('Risk Level')['Value'].mean().reset_index()
-        st.dataframe(mean_by_risk)
+        # Statistics by rate type
+        st.write("### Statistics by Rate Type")
+        rate_stats = filtered_df.groupby('Description')['Value'].agg(['mean', 'median', 'std', 'min', 'max'])
+        st.write(rate_stats)
+        
+        # Yearly statistics
+        st.write("### Yearly Statistics")
+        yearly_stats = filtered_df.groupby('Year')['Value'].agg(['mean', 'median', 'std', 'min', 'max'])
+        st.write(yearly_stats)
     else:
         st.warning("No data matches your filters")
-
-# About Page
-elif page == "About":
-    st.subheader("About this Dashboard")
-    st.write("""
-        This dashboard visualizes and analyzes interest rates with a focus on risk classification. 
-        The data is categorized into different risk levels based on interest rate values:
-        - **Low Risk**: Interest rate below 10%
-        - **Medium Risk**: Interest rate between 10% and 20%
-        - **High Risk**: Interest rate above 20%
-        
-        You can filter the data by rate type, risk level, and year to perform various visual analyses such as:
-        - Scatter plots of interest rates by risk level
-        - Pie charts of risk level distributions
-        - Area charts to visualize trends over time
-        - Heatmaps of interest rates by year and risk level
-        
-        **Created by [Your Name]**.
-    """)
