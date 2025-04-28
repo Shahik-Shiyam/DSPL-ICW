@@ -2,27 +2,41 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+import numpy as np
 
-# Load data
+# Load and enhance data with Risk Level
 @st.cache_data
 def load_data():
     df = pd.read_csv('Interest_Rates.csv')
+    
+    # Add Risk Level classification
+    def classify_risk(value):
+        if value < 10: return "Low"
+        elif value < 20: return "Medium"
+        else: return "High"
+    
+    df['Risk Level'] = df['Value'].apply(classify_risk)
     return df
 
 df = load_data()
 
-# Set up the dashboard
-st.set_page_config(page_title="Interest Rates Dashboard", layout="wide")
-st.title("Historical Interest Rates Analysis (1950-2008)")
+# Dashboard setup
+st.set_page_config(page_title="Interest Rates Risk Analysis", layout="wide")
+st.title("Interest Rates with Risk Level Classification")
 
 # Sidebar controls
-st.sidebar.header("Dashboard Controls")
+st.sidebar.header("Filters")
 rate_types = df['Description'].unique()
 selected_rates = st.sidebar.multiselect(
-    "Select rate types to display", 
+    "Select rate types", 
     rate_types, 
     default=["TREASURY BILL RATE", "ADVANCE RATE (END OF PERIOD)"]
+)
+
+risk_levels = st.sidebar.multiselect(
+    "Select risk levels",
+    ["Low", "Medium", "High"],
+    default=["Low", "Medium", "High"]
 )
 
 year_range = st.sidebar.slider(
@@ -32,232 +46,154 @@ year_range = st.sidebar.slider(
     value=(1990, 2008)
 )
 
-# Filter data based on selections
-filtered_df = df[
-    (df['Description'].isin(selected_rates)) & 
+# Filter data
+filtered_df = df[(
+    df['Description'].isin(selected_rates)) & 
+    (df['Risk Level'].isin(risk_levels)) & 
     (df['Year'] >= year_range[0]) & 
     (df['Year'] <= year_range[1])
 ]
 
-# Main dashboard layout
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    st.subheader("Interest Rate Trends")
-    
-    if not selected_rates:
-        st.warning("Please select at least one rate type from the sidebar")
-    else:
-        # Line chart
-        fig = px.line(
-            filtered_df, 
-            x="Year", 
-            y="Value", 
-            color="Description",
-            title=f"Interest Rates ({year_range[0]}-{year_range[1]})",
-            labels={"Value": "Interest Rate (%)", "Year": "Year"},
-            height=500
-        )
-        fig.update_layout(hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.subheader("Key Statistics")
-    
-    if not selected_rates:
-        st.write("Select rates to see statistics")
-    else:
-        for rate in selected_rates:
-            rate_data = filtered_df[filtered_df['Description'] == rate]
-            if not rate_data.empty:
-                st.metric(
-                    label=f"{rate} (Avg)",
-                    value=f"{rate_data['Value'].mean():.2f}%",
-                    delta=f"Range: {rate_data['Value'].min():.2f}% - {rate_data['Value'].max():.2f}%"
-                )
-
-# Additional visualizations
+# Main visualizations
 st.subheader("Comparative Analysis")
 
-tab1, tab2, tab3 = st.tabs(["All Rates Heatmap", "Yearly Comparison", "Rate Distribution"])
+# Create tabs for different visualizations
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Scatter Plot", "Pie Chart", "Area Chart", "Histogram", "Heatmap"])
 
 with tab1:
-    # Prepare data for heatmap
-    heatmap_data = df.pivot_table(index='Year', columns='Description', values='Value')
-    fig = px.imshow(
-        heatmap_data,
-        labels=dict(x="Rate Type", y="Year", color="Interest Rate"),
-        title="Interest Rates Heatmap",
-        aspect="auto"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    st.subheader("Interest Rates by Risk Level")
+    if not filtered_df.empty:
+        fig = px.scatter(
+            filtered_df,
+            x="Year",
+            y="Value",
+            color="Risk Level",
+            color_discrete_map={"Low": "green", "Medium": "orange", "High": "red"},
+            hover_data=["Description"],
+            title="Rates Colored by Risk Level",
+            labels={"Value": "Interest Rate (%)"}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No data matches your filters")
 
 with tab2:
-    selected_year = st.selectbox("Select year to compare rates", sorted(df['Year'].unique(), reverse=True))
-    year_data = df[df['Year'] == selected_year]
-    
-    if not year_data.empty:
-        fig = px.bar(
-            year_data,
-            x="Description",
-            y="Value",
-            title=f"Rate Comparison for {selected_year}",
-            labels={"Value": "Interest Rate (%)", "Description": "Rate Type"},
-            color="Description"
+    st.subheader("Risk Level Distribution")
+    if not filtered_df.empty:
+        risk_counts = filtered_df['Risk Level'].value_counts().reset_index()
+        risk_counts.columns = ['Risk Level', 'Count']
+        
+        fig = px.pie(
+            risk_counts,
+            names="Risk Level",
+            values="Count",
+            color="Risk Level",
+            color_discrete_map={"Low": "green", "Medium": "orange", "High": "red"},
+            hole=0.3
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.write(f"No data available for {selected_year}")
+        st.warning("No data matches your filters")
 
 with tab3:
-    if not selected_rates:
-        st.write("Select rates to see distributions")
-    else:
-        fig = px.box(
-            filtered_df,
-            x="Description",
-            y="Value",
-            title="Rate Distributions",
-            labels={"Value": "Interest Rate (%)", "Description": "Rate Type"},
-            color="Description"
+    st.subheader("Risk Level Trends Over Time")
+    if not filtered_df.empty:
+        yearly_risk = filtered_df.groupby(['Year', 'Risk Level']).size().unstack().fillna(0)
+        
+        fig = px.area(
+            yearly_risk,
+            color_discrete_map={"Low": "green", "Medium": "orange", "High": "red"},
+            title="Count of Rates by Risk Level Each Year"
         )
+        fig.update_layout(yaxis_title="Count of Rates")
         st.plotly_chart(fig, use_container_width=True)
-
-# Data table
-st.subheader("Raw Data")
-st.dataframe(filtered_df.sort_values(['Year', 'Description']), height=300)
-
-
-# Add this to your existing Streamlit dashboard code (under the tabs section)
-
-# Add a new tab for the histogram
-tab1, tab2, tab3, tab4 = st.tabs(["All Rates Heatmap", "Yearly Comparison", "Rate Distribution", "Histogram"])
-
-# ... keep your existing tab1, tab2, tab3 code ...
+    else:
+        st.warning("No data matches your filters")
 
 with tab4:
     st.subheader("Interest Rate Distribution Histogram")
-    
-    # User controls for histogram
-    col1, col2 = st.columns(2)
-    with col1:
-        hist_rate = st.selectbox(
+    if not filtered_df.empty:
+        selected_rate = st.selectbox(
             "Select rate type for histogram",
-            rate_types,
-            index=0
+            filtered_df['Description'].unique()
         )
-    with col2:
         bins = st.slider(
             "Number of bins",
             min_value=5,
             max_value=50,
             value=15
         )
-    
-    # Filter data for selected rate
-    hist_data = df[df['Description'] == hist_rate]
-    
-    if not hist_data.empty:
-        fig = px.histogram(
-            hist_data,
-            x="Value",
-            nbins=bins,
-            title=f"Distribution of {hist_rate}",
-            labels={"Value": "Interest Rate (%)"},
-            color_discrete_sequence=['#636EFA'],
-            marginal="box"  # Adds a box plot on top
-        )
         
-        # Add vertical line for mean
-        mean_val = hist_data['Value'].mean()
-        fig.add_vline(
-            x=mean_val,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Mean: {mean_val:.2f}%",
-            annotation_position="top"
-        )
+        hist_data = filtered_df[filtered_df['Description'] == selected_rate]
         
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Display statistics
-        st.write(f"""
-        **Statistics for {hist_rate}**:
-        - Mean: {hist_data['Value'].mean():.2f}%
-        - Median: {hist_data['Value'].median():.2f}%
-        - Standard Deviation: {hist_data['Value'].std():.2f}%
-        - Minimum: {hist_data['Value'].min():.2f}%
-        - Maximum: {hist_data['Value'].max():.2f}%
-        """)
+        if not hist_data.empty:
+            fig = px.histogram(
+                hist_data,
+                x="Value",
+                nbins=bins,
+                color="Risk Level",
+                color_discrete_map={"Low": "green", "Medium": "orange", "High": "red"},
+                title=f"Distribution of {selected_rate}",
+                labels={"Value": "Interest Rate (%)"},
+                marginal="rug",
+                hover_data=["Year"]
+            )
+            
+            # Add vertical line for mean
+            mean_val = hist_data['Value'].mean()
+            fig.add_vline(
+                x=mean_val,
+                line_dash="dash",
+                line_color="black",
+                annotation_text=f"Mean: {mean_val:.2f}%",
+                annotation_position="top"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Display statistics
+            st.write(f"""
+            **Statistics for {selected_rate}**:
+            - Mean: {hist_data['Value'].mean():.2f}%
+            - Median: {hist_data['Value'].median():.2f}%
+            - Standard Deviation: {hist_data['Value'].std():.2f}%
+            - Minimum: {hist_data['Value'].min():.2f}%
+            - Maximum: {hist_data['Value'].max():.2f}%
+            """)
+        else:
+            st.warning(f"No data available for {selected_rate} with current filters")
     else:
-        st.warning(f"No data available for {hist_rate}")
+        st.warning("No data matches your filters")
 
+with tab5:
+    st.subheader("Heatmap of Interest Rates by Year and Risk Level")
+    if not filtered_df.empty:
+        # Pivot table to structure the data for heatmap
+        heatmap_data = filtered_df.pivot_table(
+            index='Year', columns='Risk Level', values='Value', aggfunc=np.mean
+        )
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data.values,
+            x=heatmap_data.columns,
+            y=heatmap_data.index,
+            colorscale='RdYlGn',
+            colorbar=dict(title="Interest Rate (%)")
+        ))
+        fig.update_layout(
+            title="Heatmap of Average Interest Rates by Risk Level",
+            xaxis_title="Risk Level",
+            yaxis_title="Year"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No data matches your filters")
 
-
-        import streamlit as st
-import pandas as pd
-import plotly.express as px
-
-# Load data
-@st.cache_data
-def load_data():
-    df = pd.read_csv('Interest_Rates.csv')
-    return df
-
-df = load_data()
-
-# Set up the dashboard
-st.set_page_config(page_title="Interest Rates Dashboard", layout="wide")
-st.title("Historical Interest Rates Analysis (1950-2008)")
-
-# Sidebar controls
-st.sidebar.header("Dashboard Controls")
-
-# Get all unique rate types
-rate_types = df['Description'].unique()
-
-# Add "Select All" checkbox
-select_all = st.sidebar.checkbox("Select All Rate Types", value=True)
-
-if select_all:
-    selected_rates = rate_types
-else:
-    selected_rates = st.sidebar.multiselect(
-        "Select rate types to display", 
-        rate_types,
-        default=["TREASURY BILL RATE", "ADVANCE RATE (END OF PERIOD)"]
-    )
-
-year_range = st.sidebar.slider(
-    "Select year range",
-    min_value=int(df['Year'].min()),
-    max_value=int(df['Year'].max()),
-    value=(1990, 2008)
+# Show data table with risk levels
+st.subheader("Detailed Data with Risk Levels")
+st.dataframe(
+    filtered_df.sort_values(['Year', 'Risk Level']),
+    column_order=['Year', 'Description', 'Value', 'Risk Level'],
+    hide_index=True,
+    height=300
 )
-
-# Filter data based on selections
-filtered_df = df[
-    (df['Description'].isin(selected_rates)) & 
-    (df['Year'] >= year_range[0]) & 
-    (df['Year'] <= year_range[1])
-]
-
-# Main visualization
-st.subheader("Interest Rate Trends")
-
-if not selected_rates:
-    st.warning("Please select at least one rate type from the sidebar")
-else:
-    fig = px.line(
-        filtered_df, 
-        x="Year", 
-        y="Value", 
-        color="Description",
-        title=f"Interest Rates ({year_range[0]}-{year_range[1]})",
-        labels={"Value": "Interest Rate (%)", "Year": "Year"},
-        height=500
-    )
-    fig.update_layout(hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True)
-
-# Rest of your dashboard code...
